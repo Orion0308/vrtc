@@ -1,0 +1,11 @@
+{
+"rules": [
+{
+"primary-output": "CMakeFiles/vrtc_core.dir/src/core/Jobs.cpp.o",
+"requires": [
+]
+}
+],
+"version": 0,
+"revision": 0
+}

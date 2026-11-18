@@ -1,0 +1,8 @@
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_core.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_shared.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_server.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_client.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_check_split.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/edit_cache.dir
+C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/rebuild_cache.dir

@@ -1,0 +1,54 @@
+{
+	"bmi-installation" : null,
+	"compiler-frontend-variant" : "GNU",
+	"compiler-id" : "GNU",
+	"compiler-simulate-id" : "",
+	"config" : "RelWithDebInfo",
+	"cxx-modules" : {},
+	"database-info" : null,
+	"dir-cur-bld" : "C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo",
+	"dir-cur-src" : "C:/Users/13ver/CLionProjects/VRTC",
+	"dir-top-bld" : "C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo",
+	"dir-top-src" : "C:/Users/13ver/CLionProjects/VRTC",
+	"exports" : [],
+	"forward-modules-from-target-dirs" : [],
+	"include-dirs" : 
+	[
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\src\\server",
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\src\\shared",
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\src\\core",
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\external",
+		"C:\\Users\\13ver\\.vcpkg-clion\\vcpkg\\installed\\x64-mingw-dynamic\\include"
+	],
+	"language" : "CXX",
+	"linked-target-dirs" : [],
+	"module-dir" : "C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_server.dir",
+	"sources" : 
+	{
+		"CMakeFiles/vrtc_server.dir/src/server/Server.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/server/Server.cpp"
+		},
+		"CMakeFiles/vrtc_server.dir/src/server/Systems.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/server/Systems.cpp"
+		},
+		"CMakeFiles/vrtc_server.dir/src/server/World.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/server/World.cpp"
+		},
+		"CMakeFiles/vrtc_server.dir/src/server/WorldEdit.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/server/WorldEdit.cpp"
+		},
+		"CMakeFiles/vrtc_server.dir/src/server/WorldGen.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/server/WorldGen.cpp"
+		}
+	}
+}

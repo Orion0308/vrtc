@@ -1,0 +1,11 @@
+{
+"rules": [
+{
+"primary-output": "CMakeFiles/vrtc_client.dir/src/client/Input.cpp.o",
+"requires": [
+]
+}
+],
+"version": 0,
+"revision": 0
+}

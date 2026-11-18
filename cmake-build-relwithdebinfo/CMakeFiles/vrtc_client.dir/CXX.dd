@@ -1,0 +1,27 @@
+ninja_dyndep_version = 1.0
+build CMakeFiles/vrtc_client.dir/src/client/Camera.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/ChunkRenderer.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/ClientWorld.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/DebugUI.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Engine.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/GpuProfiler.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Input.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Mesher.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Renderer.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Shader.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/TerrainTextures.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Texture.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_client.dir/src/client/Window.cpp.obj: dyndep
+

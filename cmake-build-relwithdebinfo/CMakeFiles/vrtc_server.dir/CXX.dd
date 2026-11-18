@@ -1,0 +1,11 @@
+ninja_dyndep_version = 1.0
+build CMakeFiles/vrtc_server.dir/src/server/Server.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_server.dir/src/server/Systems.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_server.dir/src/server/WorldEdit.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_server.dir/src/server/World.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_server.dir/src/server/WorldGen.cpp.obj: dyndep
+

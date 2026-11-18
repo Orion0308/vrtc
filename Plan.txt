@@ -1,0 +1,925 @@
+14 Nov 2026 · @liam
+1. How to use this spec
+This is the single reference for building vrtc from scratch. A model or person working on the code reads sections 2 to 5 before any task, then the section for the subsystem in hand.
+• Precedence: hard rules (section 3) beat section details, which beat existing code. If a task cannot be done without breaking a hard rule, stop and flag it instead of working around it.
+• One milestone at a time: section 18 fixes the build order. Do not build ahead. A milestone is done only when its acceptance criteria pass.
+• Tunable numbers: any value marked initial is a starting point. Keep all of them in shared/Config.h so they can be changed in one place.
+• When the spec is silent: choose the simplest option that respects the hard rules, and record it in DECISIONS.md at the repo root.
+• Old code: the project restarts from scratch. The previous code is reference material only; section 19 says what to carry over.
+• Budgets: the performance numbers in section 17 are engineering targets, not measurements. Measure with the debug UI before optimising anything.
+2. Game vision
+vrtc is a first-person sandbox in an endless, fully destructible voxel world. Players gather and farm resources, build and automate defences, and survive hordes or fight other players.
+Pillars
+1.  Fine-grained destruction. The world is made of 1 m blocks that break down into 6.25 cm micro-voxels. Nothing is indestructible except bedrock.
+2.  Minecraft-style sandbox. An endless streamed world with caves and overhangs. Any block can be broken or placed anywhere.
+3.  Defend what you build. Hordes find the base from any direction, including underground, and dig through whatever is in the way. Wall material and layout matter.
+4.  Farm and automate. Crops and mining feed crafting. Later, machines and belts produce ammunition and defences unattended.
+Core loop
+Explore and gather, then farm and craft, then build and fortify, then survive a wave or raid, then expand.
+Modes
+• Single-player and co-op against hordes come first.
+• Player-versus-player comes last (milestone 10).
+Non-goals for version 1
+• Top-down or RTS-style control.
+• Deterministic lockstep networking.
+• Rigid-body physics for broken terrain.
+• Fluid simulation.
+• Ray tracing, shadow maps, distant-terrain level of detail.
+• A scripting or mod API.
+• Unlimited world height.
+3. Hard rules
+These eleven invariants hold in every milestone. Breaking one is a bug even if the game still runs.
+1.  Server and client are separate. server/ never includes OpenGL, GLFW, ImGui or any client/ header. client/ never includes server/ headers. Both may include shared/ and core/.
+2.  Messages only. Server and client communicate only through the message protocol in section 11, including in single-player.
+3.  The server is authoritative. The client sends intentions ("break here", "move"). The server validates and decides. The client never mutates world or entity state except by applying server messages or predicting its own player.
+4.  One way to edit the world. Every change to block or micro-voxel data goes through the world edit API in section 7. Nothing else writes to chunk storage.
+5.  Workers get snapshots. Worker threads never read live chunks or entities. They receive an immutable copy and return results through a queue that the owning thread drains.
+6.  OpenGL on the main thread only.
+7.  No per-block overhead. No heap allocation, virtual call or hash-map lookup inside a loop that runs per block or per micro-voxel.
+8.  Block coordinates are integers. Convert from world position with floor, never by truncating a float. Split into chunk and local parts with arithmetic shift and mask, never division or modulo.
+9.  Data-driven definitions. Blocks, items and recipes live in registries loaded from data files. No switch on block ID in engine code.
+10.  Always runnable, always measured. Every milestone leaves a playable build, and every new subsystem adds its counters to the debug UI.
+11.  Fail loudly at start-up. If a window, context, shader or data file fails to load, stop with a clear message. Never continue with a half-initialised engine.
+4. Tech stack and repository layout
+The project is C++23 on OpenGL 4.6 core, built with CMake as four libraries whose include rules enforce the server/client split.
+Libraries
+Library
+Use
+Status
+GLFW, glad
+Window, input, GL 4.6 core context
+Already used
+glm
+Maths
+Already used
+Dear ImGui
+Debug UI, early game UI
+Already used
+stb_image
+Texture loading
+Already used
+FastNoiseLite
+Terrain noise (single header)
+Add at milestone 2
+LZ4
+Chunk compression for saves and network
+Add at milestone 6
+ENet
+UDP transport
+Add at milestone 10
+The job system is a small in-house thread pool (std::jthread workers and a priority queue). Do not add a third-party one.
+Layout
+src/
+  core/     Jobs, Time, Log, small containers, assertions
+  shared/   Config.h, coordinate types, BlockRegistry, ItemRegistry,
+            Chunk and MicroBlock (data only), PlayerMovement,
+            Raycast, protocol messages, binary serialisation
+  server/   World, WorldGen, WorldEdit, ChunkStore (region files),
+            ECS and systems, Nav, HordeDirector, block entities,
+            Server (tick loop)
+  client/   Engine (frame loop), Window, Input, Camera, ClientWorld (replica),
+            Mesher, ChunkRenderer, Renderer, Lighting, Prediction,
+            UI, DebugUI, GpuProfiler
+  main.cpp
+assets/
+  shaders/  textures/  models/
+  data/     blocks.json  items.json  recipes.json
+Dependency direction
+• core depends on nothing.
+• shared depends on core.
+• server depends on shared and core.
+• client depends on shared and core.
+• main.cpp links server and client and connects them with a local connection.
+Each is its own CMake static library with only its allowed include directories, so a forbidden include fails to compile.
+Threads
+• Main thread: input, client logic, all OpenGL.
+• Server thread: the fixed tick.
+• Worker pool: terrain generation, meshing, lighting, saving, flow fields. Size is hardware threads minus two, minimum two.
+5. Units, coordinates and conventions
+One block is one metre, one chunk is 32 blocks per side, and one micro-voxel is a sixteenth of a block.
+Constants (all in shared/Config.h)
+Constant
+Initial value
+Meaning
+CHUNK_BITS
+5
+Chunk side is 32 blocks
+MICRO_RES
+16
+Micro-voxels per block side (6.25 cm)
+WORLD_MIN_CHUNK_Y, WORLD_MAX_CHUNK_Y
+-4, 8
+World spans blocks -128 to 255 vertically
+TICK_RATE
+30 Hz
+Server simulation rate
+LOAD_RADIUS
+12 chunks horizontal, 4 vertical
+Chunks kept loaded around a player
+SIM_RADIUS
+6 chunks
+Entities and block entities tick inside this
+VERTEX_STEPS
+16 per block
+Vertex position quantisation
+Axes
+• Right-handed, +Y up, +X east, -Z north.
+• Front faces wind counter-clockwise.
+• Face order is fixed everywhere as index 0 to 5: +Z, -Z, +X, -X, +Y, -Y.
+Coordinate types
+struct BlockPos { int32_t x, y, z; };            // world block coordinates
+struct ChunkPos { int32_t x, y, z; };            // BlockPos >> CHUNK_BITS (arithmetic shift)
+// local position inside a chunk: BlockPos & 31, each axis 0..31
+// block index inside a chunk:    x | (z << 5) | (y << 10)      -> uint16_t, 0..32767
+// micro position inside a block: each axis 0..15
+// micro bit:                     rows[y][z] bit x
+• The horizontal world is unbounded within int32 chunk coordinates.
+• Negative coordinates must work. Shift and mask handle them; division and modulo do not.
+Positions and time
+• Server entity positions are glm::dvec3 in world metres.
+• The client renders relative to the camera's chunk origin: subtract in integers or doubles first, then convert to float.
+• Server durations are counted in ticks. Client animation uses seconds.
+Naming
+• PascalCase for types and functions, camelCase for variables, UPPER_SNAKE for constants.
+• Everything lives in namespace vrtc.
+• Handles are uint32_t aliases (MeshHandle, TextureHandle). Anything whose slots are reused carries a generation.
+6. World data model
+The world is a hash map of chunks; each chunk is a flat, palette-compressed array of block IDs, and only damaged blocks carry a micro-voxel mask. There is no octree.
+Blocks
+• BlockId is uint16_t. ID 0 is air.
+• BlockRegistry maps an ID to its definition, loaded from blocks.json:
+    ◦ name
+    ◦ solid (blocks movement) and opaque (hides neighbours, blocks light)
+    ◦ texture layer for each of the six faces
+    ◦ hardness tier (0 to 15)
+    ◦ light emission (0 to 15)
+    ◦ dropped item
+    ◦ flags: has a block entity, replaceable, unbreakable
+• The registry is an array indexed by ID. Hot loops read from tightly packed side arrays (for example opaque[id]), not from the full definition.
+Chunk
+// 16x16x16 solid bits, 512 bytes. One 16-bit row per (y, z); bit x within the row.
+struct MicroBlock { uint16_t rows[MICRO_RES][MICRO_RES]; };
+
+class Chunk {
+    // Palette storage
+    std::vector<BlockId>  palette;        // IDs used in this chunk
+    std::vector<uint64_t> indices;        // bit-packed palette indices; empty when uniform
+    uint8_t bitsPerIndex = 0;             // 0 (uniform), 4, 8 or 16 (direct IDs, no palette)
+
+    // Damaged blocks only
+    std::vector<MicroBlock> micro;
+    std::vector<uint16_t>   microOwner;   // slot -> block index, for swap-and-pop
+    FlatMap<uint16_t, uint16_t> microSlot; // block index -> slot
+
+    std::array<Chunk*, 6> neighbours{};   // maintained by World on load and unload
+    uint32_t version = 0;                 // incremented on every edit
+    uint8_t  dirty = 0;                   // bit flags: save, nav, modifiedSinceGen
+
+public:
+    BlockId Get(int x, int y, int z) const;
+    void    Set(int x, int y, int z, BlockId id);           // called only by WorldEdit
+    const MicroBlock* Micro(uint16_t blockIndex) const;     // nullptr when the block is whole
+};
+• Palette widths: only 0, 4, 8 and 16 bits. When the palette outgrows the current width, repack to the next. A uniform chunk stores one palette entry and no index array.
+• Typical size: 4 bits per block is 16 KB per chunk. Uniform chunks are a few dozen bytes.
+• Start simple: milestone 2 may use a plain std::array<BlockId, 32768> behind Get and Set. Palette packing arrives in milestone 4 without changing the interface.
+Micro-voxel invariants
+1.  A block with a MicroBlock keeps its BlockId. The mask says which sixteenths remain; the ID says what they are made of.
+2.  A mask of all ones is never stored. The block is simply whole.
+3.  A mask of all zeros is never stored. The block becomes air and its slot is freed.
+4.  Slots are freed by swap-and-pop, updating microSlot for the moved entry.
+Gameplay solidity
+• Physics is exact. Every moving body (player, mob, projectile, dropped item) and every raycast collides with the exact mask. See section 13.
+• Planning is coarse. Navigation and building support use one rule: a damaged block counts as solid while at least half of its bits (2,048 of 4,096) remain.
+• Light and face culling: a block counts as non-opaque as soon as it has any mask.
+• Cost: a mask is 512 bytes and is kept uncompressed in memory so collision can read it directly. Masks are LZ4-compressed on disk and on the network.
+World
+class World {
+    std::unordered_map<ChunkPos, std::unique_ptr<Chunk>, ChunkPosHash> chunks;
+public:
+    Chunk*  GetChunk(ChunkPos);            // nullptr when not loaded
+    BlockId GetBlock(BlockPos) const;      // air when not loaded
+};
+• Look a chunk up once, then work through neighbours. Never call GetBlock in a per-block loop.
+• The server owns World on the server thread. The client owns a separate ClientWorld replica on the main thread, built from the same Chunk type.
+• Two copies exist in single-player. That is accepted for simplicity. Sharing immutable chunk data between them is a later optimisation, not a design change.
+7. World edits and events
+Three server-side primitives make every change to the world, and each change produces one event that every other system listens to.
+Primitives
+struct Sphere { glm::dvec3 centre; double radius; };
+struct Box    { glm::dvec3 min, max; };
+using Shape = std::variant<Sphere, Box>;
+
+class WorldEdit {
+public:
+    void        SetBlock(BlockPos, BlockId);
+    CarveResult Carve(const Shape&, uint8_t strength);   // remove micro-voxels
+    FillResult  Fill(const Shape&, BlockId);             // add micro-voxels (repair)
+};
+Carve algorithm
+1.  Compute the block-aligned bounding box of the shape.
+2.  For each block in the box, skip it if it is air, unbreakable, or has hardness above strength.
+3.  If the whole block lies inside the shape, set it to air.
+4.  Otherwise get or create its mask (starting from all ones) and clear every bit whose micro-voxel centre is inside the shape.
+5.  Normalise: an all-zero mask becomes air and frees the slot.
+6.  Add the number of bits removed to CarveResult, keyed by BlockId.
+CarveResult drives drops: 4,096 micro-voxels of a material equal one block item. Fractions accumulate per player.
+Change events
+• Each edit increments the chunk's version, sets its dirty flags and extends a per-chunk changed region (a local bounding box).
+• At the end of the tick the server emits one ChunkChanged { ChunkPos, localBounds, version } per edited chunk.
+• Listeners:
+    ◦ Replication: sends a BlockDelta to every client that has the chunk.
+    ◦ Navigation: recomputes standable cells for the chunk and invalidates affected flow fields.
+    ◦ Persistence: marks the chunk for saving.
+    ◦ Block entities: checks that anything standing on a removed block is still supported.
+    ◦ Collapse: connectivity check, once that system exists.
+Client side
+• The client applies BlockDelta to its replica and marks the chunk's mesh and light dirty.
+• If the change touches local coordinate 0 or 31 on any axis, the neighbouring chunk's mesh is marked dirty too.
+• The client may apply its own break or place immediately and correct itself when the delta arrives. This prediction is optional before milestone 10.
+8. Streaming, generation and persistence
+Chunks are generated or loaded on worker threads as players approach, kept while a ticket holds them, and written to disk only if they were ever edited.
+Chunk lifecycle (server)
+1.  Requested: a ticket covers the position and no chunk is loaded.
+2.  Loading: a worker reads it from a region file, or generates it if no saved copy exists.
+3.  Loaded: inserted into World on the server thread; neighbour pointers are linked; it is sent to clients in range.
+4.  Unloading: no ticket has covered it for a few seconds. If it is dirty, a worker saves a snapshot. It is then removed and neighbours are unlinked.
+Tickets
+• Each player holds a ticket covering LOAD_RADIUS around them.
+• A base core holds a ticket over its base while a horde is active or its owner is online.
+• Requests are served nearest-first. Unloading uses a radius two chunks larger than loading, so chunks do not thrash at the edge.
+• Entities and block entities tick only inside SIM_RADIUS.
+Terrain generation
+Generation is a pure function of (seed, ChunkPos) that returns chunk data. It runs on a worker and never touches World.
+1.  Density: 3D noise plus a height bias, sampled on a 4-block lattice and interpolated. Positive is solid.
+2.  Surface: grass, dirt and stone layers by depth below the first air.
+3.  Caves: a second noise field carves tunnels and chambers.
+4.  Ores: veins placed from a hash of position, by depth band.
+5.  Features: trees and boulders. A feature's placement is a pure function of its origin position, so each chunk generates its own part of any feature that overlaps it and never writes into a neighbour.
+6.  Bedrock: the lowest layer is unbreakable.
+• Output need not be bit-identical across machines, because the server sends chunks to clients.
+• A chunk above the terrain or fully inside uniform stone should return as a uniform chunk without filling an array.
+Persistence
+• Only chunks with the modifiedSinceGen flag are saved. Untouched terrain is regenerated from the seed.
+• Region files: one file per 16×16×16 chunks, named by region coordinate. A header table gives each chunk's offset and length; records are LZ4-compressed.
+• Chunk record: format version, palette, packed indices, micro list (block index and mask), block entities, entities resting in the chunk.
+• World file: seed, format version, world time, horde state.
+• Player files: position, health, inventory, one per player.
+• When: on unload, on autosave every 60 seconds, and on shutdown. Saving runs on a worker from a snapshot.
+• The chunk record bytes are the same bytes sent in the ChunkData network message. Write the serialiser once, in shared/.
+9. Meshing
+Meshing runs on worker threads on the client: the main thread snapshots a chunk with a one-block border, a worker turns it into quads, and the main thread uploads the result if it is still current.
+Job flow
+1.  The main thread picks dirty chunks, nearest and in-view first.
+2.  A chunk is meshable only when all six face neighbours are present in the replica, or known to be outside the world's height.
+3.  It builds a MeshInput:
+    ◦ a 34³ array of block IDs (the chunk plus a one-block border)
+    ◦ the masks of damaged blocks inside the chunk
+    ◦ a 34³ array of light values (from milestone 5)
+    ◦ the chunk's version
+4.  A worker produces a MeshOutput: opaque quads, transparent quads, a 15-bit face-connectivity mask for cave culling, and the version it was built from.
+5.  The main thread uploads the output if the version still matches. Otherwise it discards the result and the chunk stays dirty.
+6.  Uploads are budgeted per frame (initial: 4 chunks or 2 ms, whichever comes first).
+Chunks that are uniform air skip the job entirely.
+Definitions
+• Opaque-whole: a block whose definition is opaque and which has no micro mask. Only opaque-whole blocks hide their neighbours' faces.
+• A damaged block in the border counts as not opaque-whole. This costs a few hidden faces and avoids copying neighbour masks.
+Pass 1: whole blocks
+• For each of the six face directions, a face is visible when the block is whole and solid and the neighbour in that direction is not opaque-whole.
+• Milestone 2 may emit one quad per visible face.
+• The target is binary greedy meshing: build the visibility of each slice as bit rows, then merge runs into rectangles.
+• Two faces merge only when texture layer, light and ambient occlusion match at all four corners.
+Pass 2: damaged blocks
+• Each damaged block is meshed on its own 16³ grid with the same greedy method, working on the 16-bit rows directly. The quads of each damaged block are cached and rebuilt only when that block's mask changes.
+• Faces inside the block are culled by the mask's own bits.
+• Faces on the block's boundary are culled only against an opaque-whole neighbour.
+• Vertex positions land on sixteenths of a block, which the vertex format represents exactly.
+Output rules
+• Every primitive is a quad of four vertices. No per-chunk index data is produced (section 10 explains why).
+• Texture coordinates are not stored. The shader derives them from position and face, one tile per block, so merged quads tile and micro-faces show the correct part of the texture.
+• Ambient occlusion is 2 bits per vertex, computed from the three neighbours at each corner, for whole blocks only. Micro-faces use full brightness and rely on light and face shading.
+10. Rendering
+Terrain has its own draw path built for thousands of chunks in one call; the existing sort-key renderer is kept for entities and debug drawing.
+Chunk vertex format (8 bytes)
+word a:  x:10 | y:10 | z:10 | ao:2          position in 1/16 block steps, chunk-local
+word b:  face:3 | layer:12 | sky:4 | blockLight:4 | spare:9
+• Position range needed is 0 to 512 (32 blocks × 16 steps), which fits in 10 bits.
+• face is the face index from section 5. It replaces the 16-bit packed normal of the old format, since chunk faces only ever point along an axis.
+• layer is the texture array layer, up to 4096.
+• Entities and models use a separate, unpacked vertex format.
+Chunk draw path
+• Milestone 2: one vertex array and buffer per chunk, drawn one at a time with the chunk origin as a uniform. Simple and good enough to get terrain on screen.
+• Milestone 5:
+    ◦ One large vertex buffer holds every chunk mesh, managed by a free-list allocator.
+    ◦ One shared static index buffer holds the quad pattern 0,1,2, 0,2,3 repeated. Every chunk draws from it using its own base vertex.
+    ◦ Each frame the CPU culls chunks and writes one indirect command per visible chunk.
+    ◦ A single glMultiDrawElementsIndirect call draws all opaque terrain.
+    ◦ Per-chunk origins live in a shader storage buffer indexed by gl_DrawID, stored relative to the camera's chunk.
+Culling
+• Frustum: test each loaded chunk's bounding box.
+• Cave culling: the mesher flood-fills the chunk's non-opaque cells and records which pairs of faces connect (15 bits). Each frame, a breadth-first walk starts at the camera's chunk and steps only through connected faces, never back toward the camera. Chunks not reached are skipped.
+• Visible chunks are drawn front to back so the depth test rejects hidden fragments early.
+Frame order
+1.  Opaque terrain.
+2.  Opaque entities.
+3.  Sky.
+4.  Transparent terrain (glass, later water), chunk by chunk from back to front.
+5.  Particles.
+6.  UI and debug UI.
+Lighting
+• Two channels per block, each 0 to 15: sky light and block light.
+• Light is computed on the client only. The server needs just one query for crops and spawning: whether a block has open sky above, which it answers from a per-column height value.
+• Propagation: flood fill. Sky light enters from above at 15 and loses 1 per step sideways. Block light starts at the emitter's level and loses 1 per step. Opaque-whole blocks stop light; damaged blocks let it through.
+• Jobs: a light job takes a snapshot of the chunk and its 26 neighbours and returns the chunk's light array. A change in light marks the mesh dirty.
+• Shading: brightness is the larger of sky light scaled by time of day and block light, multiplied by ambient occlusion and a fixed per-face factor (top brightest, bottom darkest).
+• No shadow maps in version 1.
+Textures and materials
+• Terrain uses one texture array of 16×16 tiles: nearest filtering up close, mipmaps at distance, repeat wrapping. This is the existing TextureManager behaviour.
+• Layer 0 is reserved for a visible "missing texture" tile so a failed load is obvious.
+Entities
+• Models are authored as .vox files and baked to a mesh at load.
+• All instances of a model draw in one instanced call, with a per-instance transform, tint and sampled light level.
+Other
+• Distance fog fades terrain out just inside the load radius to hide chunks appearing.
+• The framebuffer is sRGB; textures are loaded as sRGB.
+11. Server/client boundary
+The server ticks at a fixed 30 Hz on its own thread and the client renders as fast as it can; the two exchange binary messages over a connection interface that is in-memory in single-player and a network socket later.
+Connection
+enum class Channel : uint8_t { Reliable, Unreliable };
+
+class IConnection {
+public:
+    virtual void Send(std::span<const uint8_t> message, Channel) = 0;
+    virtual bool Poll(std::vector<uint8_t>& out) = 0;   // false when empty
+};
+• LocalConnection is a pair of thread-safe queues. It is the only implementation until milestone 10.
+• Messages are hand-serialised: a one-byte message type, little-endian fields, variable-length integers for counts. The protocol carries a version number checked on join.
+Client to server
+Message
+Contents
+Channel
+Join
+Protocol version, player name
+Reliable
+PlayerInput
+Sequence number, move axes, yaw, pitch, button bits
+Unreliable
+Dig
+Target block, hit point, hotbar slot
+Reliable
+Place
+Target block, face, hotbar slot
+Reliable
+Interact
+Target block or entity
+Reliable
+InventoryAction
+Move, split, craft, drop
+Reliable
+Server to client
+Message
+Contents
+Channel
+Welcome
+Player entity ID, world seed, config values
+Reliable
+ChunkData
+Chunk position, version, compressed record
+Reliable
+ChunkUnload
+Chunk position
+Reliable
+BlockDelta
+Chunk position, version, list of block index + ID + optional mask
+Reliable
+EntitySpawn, EntityDespawn
+Entity ID, visual ID, initial state
+Reliable
+EntitySnapshot
+Tick, list of entity ID + position + rotation + state bits
+Unreliable
+PlayerState
+Last input sequence processed, position, velocity
+Unreliable
+InventoryUpdate
+Changed slots
+Reliable
+WorldEvent
+Explosion, sound or particle at a position
+Unreliable
+GameState
+Time of day, wave number, core health
+Reliable
+Server tick order
+1.  Drain incoming messages.
+2.  Apply player inputs and actions.
+3.  Run systems in the order given in section 12.
+4.  Flush world edits and emit ChunkChanged events.
+5.  Update streaming: start loads, finish loads, unload.
+6.  Send replication messages.
+The tick has 33 ms available and should normally use under 10 ms.
+Client frame order
+1.  Poll input and send PlayerInput.
+2.  Drain server messages within a time budget, so a burst of chunks cannot stall a frame.
+3.  Run local player prediction at the tick rate.
+4.  Start and collect meshing and lighting jobs.
+5.  Render: interpolate the local player between its last two predicted states, and remote entities between snapshots about 100 ms in the past.
+Prediction
+• Player movement code lives in shared/PlayerMovement and is a pure function of state, input and a world-query interface.
+• The client runs it immediately on its own inputs and keeps the unacknowledged ones.
+• The server runs the same function and reports the last sequence number it processed.
+• On PlayerState, the client resets to the server's state and replays the unacknowledged inputs. With no latency this changes nothing.
+Single-player
+• The server thread runs in the same process. Pausing stops the tick.
+12. Entities and ECS
+Moving things (players, mobs, projectiles) live in an in-house sparse-set ECS on the server; things fixed to a block (crops, turrets, machines) are block entities stored in their chunk.
+ECS requirements
+The existing sparse-set design is kept and completed. It must provide:
+• Entity: a 20-bit index and a 12-bit generation. The registry records the live generation of every index and offers IsAlive(entity).
+• Pools: Add, Remove, Has, Get and TryGet. Get asserts that the entity is alive and has the component. Remove on a missing component is a no-op, not an error.
+• Views: View<A, B, ...> iterates the smallest pool and tests the others.
+• Deferred changes: creating or destroying entities and adding or removing components during iteration goes through a command buffer applied at the end of the system.
+• Destroy: removes the entity from every pool that has it, then bumps the generation.
+Systems are plain functions taking a server context. They run in a fixed order, listed below. There is no scheduler and no system base class.
+Server components
+Component
+Fields
+Transform
+Position (dvec3), yaw, pitch
+Velocity
+Linear velocity, on-ground flag
+Collider
+Half extents of the bounding box
+Health
+Current, maximum
+Team
+Team ID
+PlayerControl
+Connection, latest inputs, last processed sequence
+Inventory
+Item stacks, selected slot
+MobAI
+Type, state, target entity or block, next think tick
+Projectile
+Owner, damage, carve radius, strength, ticks to live
+Replicated
+Visual ID, last state sent
+Server components never hold mesh, texture or material handles. A visual ID is the only link to rendering.
+System order per tick
+1.  Player input and movement.
+2.  Mob AI (thinking is staggered, see section 15).
+3.  Mob movement and collision.
+4.  Projectiles.
+5.  Damage and death.
+6.  Block entities.
+7.  World edit flush and change events.
+8.  Navigation updates.
+9.  Horde director and spawning.
+10.  Apply deferred destroys.
+11.  Replication.
+Spatial index
+• A hash grid with 8 m cells maps cell to entity list. It is updated when an entity crosses a cell boundary.
+• All "who is near this point" queries use it: turret targeting, melee, explosions, separation, replication interest.
+Block entities
+• Stored per chunk as a small sorted array keyed by block index, with one typed array per kind: crop, chest, turret, trap, machine, belt, base core.
+• They are not ECS entities and have no per-instance virtual calls.
+• They do not poll every tick. Each chunk keeps a queue of scheduled wake-ups (tick number and block index). A crop schedules its next growth; a turret schedules its next shot.
+• They are saved and sent with their chunk.
+• If the block is removed, its block entity is removed and its contents drop.
+Client entities
+• The client keeps a simple table of replicated entities: ID, visual ID, and the last two snapshots to interpolate between. It does not need the full ECS.
+13. Player controller and physics
+Every moving body, from the player to a 6.25 cm bullet, collides with the exact micro-voxels of the world through one shared swept-box test. A body passes through any gap it fits and stops at any solid micro-voxel, however fast it moves.
+Values (initial)
+Value
+Setting
+Player bounding box
+0.6 × 1.8 × 0.6 m
+Eye height
+1.62 m
+Walk, sprint speed
+4.3, 5.6 m/s
+Gravity
+28 m/s²
+Jump height
+1.25 m
+Step height
+0.5 m (8 micro-voxels)
+Reach
+5 m
+Default bullet box
+4 cm cube
+Slide iterations per tick
+3
+Movement
+• shared/PlayerMovement advances one tick: apply input acceleration, gravity and friction, then move and collide.
+• It reads the world only through a small query interface (IsSolidBlock, MicroMask), so the same code runs on server and client.
+Collision
+shared/Sweep provides one function, SweepBox(world, box, displacement), which returns how far the box can travel, the face normal of the first contact, and the block and micro-voxel hit.
+1.  Walk the block grid in the order the box's leading faces cross grid planes (a 3D DDA generalised from a point to a box).
+2.  At each crossing, test only the cells that the leading face newly enters.
+3.  A whole solid block is a contact.
+4.  A damaged block is not tested as a unit. Continue the same walk inside it at 6.25 cm steps, testing the leading face against the mask's 16-bit rows with bit masks.
+5.  Stop at the first set bit and return the fraction of the displacement travelled.
+What this guarantees:
+• Exact: the test is against the real mask, never an approximation of it. Touching is not overlapping, so a box exactly one micro-voxel wide fits a one-wide gap when aligned with it.
+• Continuous: the walk visits every cell along the path, so a fast body can never skip through a thin wall. Cost depends on distance travelled, not on speed.
+• Shared: the player, mobs, projectiles and dropped items all use it, on server and client.
+Resolving contacts
+• Slide: on contact, move to the contact point, remove the velocity along the contact normal, and sweep again with the remaining displacement. Repeat up to the slide limit per tick.
+• Auto-step: when horizontal movement is blocked while on the ground, retry with the box raised by up to the step height. If that succeeds, keep the raised position. Without this, every 6.25 cm lip stops a walking body.
+• Mobs use the exact sweep too. Only their path planning is coarse (section 15).
+• Body against body: the same sweep is run against the boxes of nearby entities from the spatial index.
+• No rigid bodies: broken terrain does not become physics objects in version 1. Bodies are axis-aligned boxes that do not rotate.
+Projectiles and ballistics
+• A projectile is an entity with a position, velocity, box and projectile data. Each tick it applies gravity and drag, then sweeps its box along the tick's displacement.
+• A projectile box can be any size. One that is 6.25 cm or smaller flies through a one-micro-voxel tunnel in a block and hits whatever is behind it.
+• What happens on impact comes from item data:
+    ◦ Stop: deal damage and carve at the contact point.
+    ◦ Ricochet: at a shallow angle against a harder material, reflect the velocity about the contact normal with an energy loss, and continue the sweep.
+    ◦ Penetrate: carve the micro-voxels in the path, spend energy by hardness, and continue until the energy runs out.
+• A projectile can have several contacts in one tick. Each continues the sweep with the displacement that remains.
+Raycast
+• shared/Raycast is the zero-width version of the sweep: a 3D DDA over the block grid.
+• On reaching a damaged block it runs a second DDA over that block's 16³ grid and continues if it passes through a gap.
+• It returns the block, the micro-voxel, the face hit and the distance.
+• It is used only for queries with no size: player targeting, turret line of sight and explosion cover. Anything with a body uses the sweep.
+Digging and placing
+• Dig: the client sends the hit point. The server checks reach and cooldown, then calls Carve with the tool's shape and strength. A bare hand removes a small sphere (about 0.2 m radius); better tools remove more per hit and cut harder materials.
+• Place: the target cell must be air and must not overlap any entity's box. The server calls SetBlock and removes one item.
+• Repair: using a matching material on a damaged block calls Fill and consumes material in proportion to the bits restored.
+• A damaged block cannot have a different block placed into its gaps.
+14. Survival systems
+Items, crafting, farming, defences and automation are all data-driven and server-authoritative, and all sit on top of blocks and block entities.
+Items and inventory
+• ItemId is uint16_t. ItemRegistry loads items.json: name, stack size, kind (block, tool, weapon, seed, material, ammo), and kind-specific values such as tool strength, carve radius, damage and fire rate.
+• An ItemStack is ID, count and durability.
+• A player inventory is 36 slots, 9 of them the hotbar.
+• The client sends InventoryAction; the server validates and replies with InventoryUpdate.
+Drops
+• Carved material goes straight to the digger's inventory through per-player, per-material accumulators (4,096 micro-voxels make one item).
+• Dropped-item entities exist only for overflow, death and containers breaking. This avoids thousands of item entities after an explosion.
+Crafting
+• recipes.json lists inputs, outputs, the station required (hand, workbench, forge) and craft time.
+• The same recipe table drives hand crafting and machines.
+Farming
+• A crop is a block entity with a growth stage.
+• It needs tilled soil below and enough light. Sky access uses the server's column height; artificial light counts if a light-emitting block is within a few blocks.
+• Growth is a scheduled wake-up with a randomised interval. On chunk load, a crop catches up using the ticks elapsed since it was saved.
+• Harvesting yields produce and seeds.
+Defences
+Defence
+Behaviour
+Walls
+Ordinary blocks. Hardness tiers rise from wood to stone to concrete to steel
+Traps
+Block entity. Damages mobs that overlap it, wears out with use
+Turrets
+Block entity. Picks the nearest hostile in range with a clear raycast, fires a projectile on a cooldown, uses ammo from its own small inventory
+Base core
+Block entity. The horde's target. Losing it ends the run or costs the team its respawn point
+Weapons
+• Melee: a short box query in front of the player.
+• Ranged: projectiles simulated by the server.
+• Explosives: Carve with a sphere of 1 to 3 m and a strength, plus damage that falls off with distance and is blocked by solid cover.
+Day and night
+• A full day lasts 20 minutes (initial). Hordes arrive at night, growing with the day count.
+Automation (milestone 9)
+• Machines: block entities with input and output slots, a recipe and a timer.
+• Belts: stored as segments, each a run of connected belt blocks. A segment holds an ordered list of items with the gap to the item ahead. Each tick only the gaps change, so cost depends on segments, not on item count.
+• Lifts: vertical belt segments.
+• Hoppers: move items between adjacent inventories and belts on a cooldown.
+• Miners: carve the block in front on a timer and output the material.
+• No power network in version 1.
+• Machines run only in loaded chunks. A base core's ticket keeps the base loaded while its owner is online.
+15. Mobs, hordes and combat
+Hordes navigate with one shared flow field per target, computed over the cells a mob can stand in, where walls are passable at a high cost so mobs breach them.
+Standable cells
+• A cell is standable when it and the cell above are not solid and the block below is solid, using the half-solid rule from section 6.
+• Each loaded chunk in the simulation radius stores this as a 32³ bitset (4 KB), computed column by column with bit operations.
+• It is recomputed for a chunk, and for the chunks directly above and below it, on ChunkChanged.
+• Moves are implicit, not stored: from a standable cell to any of the four horizontal neighbours' standable cells that are at most 1 block up or 3 blocks down.
+Flow fields
+• One field per active target: a base core, or a player with no base nearby.
+• Build: a cost-ordered flood outward from the target over standable cells, limited to 96 blocks horizontally and 32 vertically (initial). Each reached cell stores its cost to the target as a uint16_t, in sparse per-chunk arrays.
+• Breaching: the flood may also step horizontally or diagonally downward through solid blocks, at a cost of a constant times the block's hardness. Unbreakable blocks are never crossed.
+• Use: a mob moves to the neighbouring cell with the lowest cost. If that step goes through solid, or leftover micro-voxels in a passable cell block its body, the mob attacks the block with Carve until it opens.
+• Refresh: fields rebuild on a worker from a navigation snapshot, at most every second per target, and sooner when a change event intersects the field. Mobs keep following the old field until the new one is swapped in.
+• Limit: at most 8 active fields (initial). Extra targets share the nearest field.
+• Outside the field: a mob walks in a straight line toward the target until it enters the field.
+The result is that stronger walls and longer detours change where a horde goes, and no wall holds forever.
+Mob behaviour
+• States: idle, chase, attack entity, breach block, dead.
+• Thinking (target choice, state changes) runs every fourth tick per mob, staggered by entity index. Movement runs every tick.
+• Separation: each mob is pushed away from neighbours found through the spatial index, so hordes spread instead of stacking.
+Type
+Role
+Walker
+Basic melee, weak against blocks
+Breacher
+Slow, high block damage and strength
+Exploder
+Detonates at walls or players: a carve sphere plus area damage
+Spitter
+Ranged projectile attack on players and turrets
+Flyer (later)
+Ignores the flow field, steers in 3D with raycast avoidance
+Horde director
+• A wave has a point budget that grows with the day number and player count. Each mob type has a point cost and a first day it can appear.
+• Spawn positions are standable cells in loaded chunks, 40 to 70 m from the target, with open sky and no player within 24 m.
+• Mobs spawn in batches over the first minutes of the night, capped at 300 alive (initial).
+• The director reports wave progress through GameState.
+Combat
+• Damage is queued as events during the tick and applied in the damage system, which also handles death, drops and score.
+• Projectiles: each tick, sweep the projectile's box from the old position to the new one with the shared sweep in section 13, against exact micro-voxels and against entity boxes from the spatial index. On hit, apply damage, carve, or both.
+• Explosions: Carve with a sphere, then damage each entity in range, reduced by distance and cancelled if a raycast to it is blocked.
+• Teams: the Team component decides who can hurt whom. Friendly fire and player-versus-player damage are server settings.
+Collapse (after milestone 8, optional)
+• After a change event, flood-fill solid blocks outward from the edited region, stopping at 4,096 blocks.
+• A connected group that finished without reaching that limit or bedrock is floating. Remove it with a particle effect and give drops.
+• Detached pieces do not become physics objects in version 1.
+16. Networking
+Real networking is the last milestone and adds only a second IConnection implementation; if game code has to change to support it, a hard rule was broken earlier.
+Transport
+• ENet over UDP, with a reliable ordered channel and an unreliable sequenced channel matching the Channel enum.
+• Listen server: the in-process server thread accepts remote connections alongside the host's local one.
+• Dedicated server: the server library with a small main and no client.
+Chunk streaming
+• The server sends each client the chunks inside that client's view radius, nearest first.
+• Sending is rate-limited in bytes per tick so chunk data never starves entity updates.
+• BlockDelta carries the chunk version. A client ignores deltas for chunks it does not hold and for versions it has already passed. A full mask is 512 bytes, so deltas are LZ4-compressed. A large explosion is sent as its carve shape and strength for the client to replay, followed by the resulting chunk versions to verify; carve tests use integer micro-voxel coordinates so both sides clear the same bits.
+Entity replication
+• A client receives only entities inside its interest radius, found through the spatial index.
+• Snapshots go out at 15 to 30 Hz. Positions are quantised to 1/256 m relative to the entity's chunk.
+• Each snapshot is a delta against the last one the client acknowledged.
+• When over budget, nearer entities are sent first and distant horde mobs update less often.
+• Target: under 64 kB/s per client during a 200-mob fight.
+Validation
+The server rejects or corrects:
+• digging or placing beyond reach, or faster than the tool's cooldown
+• movement faster than the movement code allows, beyond a small tolerance
+• inventory actions that do not match the server's inventory
+Player-versus-player
+• Projectiles and melee are resolved on the server, so no lag compensation is needed at first.
+• If instant-hit weapons are added, the server rewinds target positions by the shooter's latency for the hit test.
+Player identity
+• Players are keyed by name on a private server. Accounts and authentication are out of scope for version 1.
+17. Performance budgets
+The target is 60 frames per second or better at 1080p with a 12-chunk view radius on a mid-range desktop (six-core CPU, GTX 1660 or RX 580 class GPU). All figures below are initial targets to design against, not measurements.
+Client frame (main thread)
+Phase
+Budget
+Server message drain
+1 ms
+Mesh and light job hand-off, uploads
+2 ms
+Culling and indirect command build
+1.5 ms
+Entities and particles
+1 ms
+UI
+0.5 ms
+Whole frame, CPU
+8 ms
+No single frame may stall longer than 20 ms because of streaming or uploads.
+Server tick
+Case
+Budget
+Typical tick with 300 mobs
+10 ms
+Hard limit
+33 ms
+5,000 items on belts
+1 ms
+1,000 carve operations in one second
+Tick stays under 10 ms
+Worker jobs
+Job
+Budget per chunk
+Terrain generation
+3 ms
+Meshing
+3 ms
+Lighting
+2 ms
+Flow field rebuild
+20 ms per field
+Memory
+Item
+Budget
+Average loaded chunk, server
+20 KB
+About 5,600 loaded chunks (radius 12 by 4)
+120 MB on the server, similar on the client
+Damaged blocks
+512 bytes each; 250,000 is 128 MB
+Chunk meshes on the GPU
+512 MB
+Drawing
+• Opaque terrain: one multi-draw call.
+• Visible triangles: up to 3 million.
+• Entities: 1,000 instanced.
+Measuring
+• The existing frame-phase timers and GPU timer queries are kept and extended.
+• Add counters as each subsystem arrives: chunks loaded, chunks waiting for mesh, jobs queued by kind, mesh bytes, tick time by system, flow field time, bytes sent per second.
+• Optimise only what a counter shows is over budget.
+18. Milestones
+Ten milestones are built strictly in order; each ends in a playable build and is finished only when every acceptance check passes. Milestone 8 is the first complete game loop.
+M1. Foundation
+• Build: the repository layout and four CMake libraries; window, time and input; a fly camera; the job system; Config.h; logging; the debug UI and profilers carried over.
+• Accept:
+    ◦ Fly around an empty scene with the debug panel open.
+    ◦ The server library compiles with no OpenGL, GLFW or ImGui include paths.
+    ◦ Resizing and minimising the window work.
+M2. Static streaming world
+• Build: Chunk with a flat array; World; terrain generation with 3D noise; the server thread and LocalConnection carrying ChunkData and ChunkUnload; the client replica; snapshot meshing on workers; per-chunk drawing; loading and unloading around the camera.
+• Accept:
+    ◦ Fly across endless terrain with caves and overhangs at an 8-chunk radius at 60 frames per second or better.
+    ◦ No frame longer than 20 ms while streaming.
+    ◦ Memory is stable after 10 minutes of flying in one direction.
+    ◦ Terrain is seamless across chunk borders and across the origin into negative coordinates.
+M3. Player
+• Build: shared movement and collision; auto-step; raycast; Dig and Place for whole blocks; BlockDelta; a hotbar of blocks.
+• Accept:
+    ◦ Walk, jump, dig a tunnel and build a tower.
+    ◦ An edit shows on screen within two frames.
+    ◦ An edit on a chunk border updates both chunks with no gap or leftover face.
+    ◦ The player never falls through the world, including at chunk borders and negative coordinates.
+M4. Micro-destruction
+• Build: MicroBlock storage; Carve and Fill; micro meshing with per-block caching; the shared box sweep with exact micro collision for the player; micro raycast; projectiles; explosions; palette compression.
+• Accept:
+    ◦ A tool chips 6.25 cm pieces out of a block.
+    ◦ An explosion leaves a rounded crater the player can walk into without snagging.
+    ◦ A 6.25 cm projectile fired down a one-micro-voxel tunnel through a block passes through and hits what is behind it. Fired slightly off-axis, it hits the tunnel wall.
+    ◦ A projectile at 500 m/s never passes through a wall one micro-voxel thick.
+    ◦ A fully carved block becomes air and its mask slot is freed.
+    ◦ 1,000 carves in one second keep the server tick under 10 ms.
+M5. Performance and visibility
+• Build: the shared vertex buffer and multi-draw path; the shared quad index buffer; frustum and cave culling; sky and block light baked into vertices; fog; upload budgeting; binary greedy meshing if not already done.
+• Accept:
+    ◦ A 12-chunk radius holds the target frame rate on the target hardware.
+    ◦ Caves are dark and a light-emitting block lights them.
+    ◦ Standing in a sealed cave draws under 10% of loaded chunks.
+M6. Persistence
+• Build: region files; autosave; world and player files.
+• Accept:
+    ◦ Quit and reload gives an identical world, including micro damage.
+    ◦ Killing the process loses at most 60 seconds of changes and never corrupts a region file.
+    ◦ Chunks that were never edited are not written.
+M7. Survival layer
+• Build: item and block registries from data; inventory and its UI; drop accumulators; crafting; tool tiers; crops; day and night; health and respawn.
+• Accept:
+    ◦ Starting with nothing, a player can gather, craft a pickaxe, grow a crop to harvest and craft wall blocks.
+    ◦ Adding a new block or item needs only data-file changes.
+M8. Mobs, hordes, combat and defences
+• Build: ECS views and deferred commands; the spatial index; standable-cell bitsets; flow fields with breaching; mob types; the horde director; weapons; traps; turrets; the base core.
+• Accept:
+    ◦ A night wave of 300 mobs reaches the base from any side, including a base that is fully underground.
+    ◦ Mobs break through wood clearly faster than stone.
+    ◦ Turrets acquire, fire and consume ammo.
+    ◦ The server tick stays under 10 ms through the wave.
+    ◦ Losing the base core ends the run.
+M9. Automation
+• Build: machines; belt segments; lifts; hoppers; miners.
+• Accept:
+    ◦ A mine-to-smelter-to-ammo-to-turret line runs unattended through a wave.
+    ◦ 5,000 items on belts cost under 1 ms per tick.
+M10. Networking and player-versus-player
+• Build: the ENet connection; the dedicated server; delta snapshots; interest management; reconciliation; server validation; team settings.
+• Accept:
+    ◦ Four players finish a co-op wave with 100 ms of simulated latency and 2% packet loss, with no visible rubber-banding in normal movement.
+    ◦ Player-versus-player damage works under the team settings.
+    ◦ Each client uses under 64 kB/s in a 200-mob fight.
+    ◦ No file outside client/Net* and server/Net* and the two main files changed to add networking.
+After M10
+Collapse, distant-terrain level of detail, water, audio, shadows, flying mobs and anything from section 20 that was deferred.
+19. Existing code
+About half of the old code carries over with fixes: the window, timing, renderer, textures, shaders, debug tools and the ECS core. The world, chunk and game code is rewritten.
+Old file
+Verdict
+Goes to
+Changes needed
+Window
+Keep
+client/
+Stop on failed init instead of continuing. Set the user pointer inside Window. Guard the aspect ratio against a zero-height (minimised) window. Hold WindowDesc by value
+Time
+Keep
+core/
+Replace std::chrono::_V2::steady_clock with std::chrono::steady_clock. Include <algorithm>
+Engine::MainLoop
+Keep the structure
+client/
+Becomes the client frame loop in section 11. Remove the hardcoded camera and projection. The frame-phase timing stays
+IGame, VoxelGame
+Drop
+
+Replaced by the client and server. AppendBox is a useful reference for face generation
+Renderer (sort-key queue)
+Keep
+client/
+Used for entities and debug only. Cache uniform locations instead of looking them up by name on every draw
+PackedVertex
+Replace
+client/
+Keep the 8-byte size. Use the layout in section 10
+TextureManager
+Keep
+client/
+AddLayer returns 0 on failure, which is also a valid layer. Reserve layer 0 for the missing-texture tile
+MaterialManager
+Keep
+client/
+None
+Shader
+Keep
+client/
+Add a destructor that deletes the program. Make it non-copyable. Cache uniform locations. Stop on compile or link failure
+DebugUI, GpuProfiler, FrameStats
+Keep
+client/
+Move the wireframe toggle's static flag into a member. Extend with the counters in section 17
+Entity, Registry, ComponentArray
+Keep and complete
+server/
+See the bug list below and the requirements in section 12
+Components.h
+Rewrite
+server/
+RenderComponent holds mesh and material handles, which breaks hard rule 1
+VoxelData.h
+Keep
+shared/
+The face order becomes the standard in section 5
+Chunk.h
+Rewrite
+shared/
+Per section 6
+ChunkMesh, Scene, Input, Systems.h
+Drop
+
+Empty stubs. Systems.h does not compile
+Known bugs in the old code
+Do not carry these over.
+• Registry::DestroyEntity calls RemoveComponent on every pool, and RemoveComponent throws when the entity has no component there. Destroying almost any entity throws.
+• ComponentArray::GetComponent checks neither that the entity has the component nor that its generation matches, so a stale handle reads another entity's data.
+• EntityManager does not guard against freeing the same entity twice, and the 12-bit generation wraps silently.
+• Chunk.h:
+    ◦ missing includes for <array>, <vector>, <cstdint> and <algorithm>
+    ◦ voxelToMask{CHUNK_VOLUME + 1} initialises only the first element
+    ◦ mask != mask.all() compares a bitset with a boolean
+    ◦ ModifyMask always calls RemoveMask
+    ◦ CoordToIdx(glm::vec3) truncates floats, which is wrong for negative positions
+• Scene allocates a fixed array of 40,000 chunk pointers, which contradicts the streamed world.
+• Window::Window keeps going after GLFW, window or glad failure and then dereferences a null window.
+20. Open decisions and glossary
+Eight choices are still open. Each has a default, and the spec is written to the default; changing one means updating the sections named.
+Decision
+Default
+Alternative
+Sections affected
+Micro-voxel resolution
+16 per block side (6.25 cm)
+8 per side (12.5 cm): an eighth of the memory and less geometry, but coarser
+5, 6, 9, 13
+Factory-built allied units
+Not in version 1; automation makes ammo and defences only
+Machines produce friendly units that follow orders and fight hordes
+12, 14, 15
+Carved material
+Straight to inventory
+Physical item drops
+14
+Floating terrain
+Stays in place until the optional collapse system
+Collapse required before milestone 8
+15, 18
+World height
+384 blocks
+Taller, or unbounded vertically
+5, 8
+ECS
+In-house sparse set
+EnTT
+12
+Network transport
+ENet
+GameNetworkingSockets
+16
+Water and fluids
+None in version 1
+Simple level-based fluid
+2, 10
+Glossary
+• Block: a 1 m cube identified by a BlockId.
+• Micro-voxel: one of the 4,096 sixteenth-size cells inside a damaged block.
+• Damaged block: a block with a MicroBlock mask, meaning some micro-voxels are missing.
+• Opaque-whole: an opaque block with no mask. The only kind that hides neighbouring faces and stops light.
+• Chunk: 32×32×32 blocks, the unit of storage, streaming, meshing and saving.
+• Replica: the client's copy of the chunks the server has sent it.
+• Snapshot: an immutable copy handed to a worker thread. Also, in networking, one update of entity states.
+• Ticket: a reason for the server to keep chunks loaded.
+• Standable cell: a block-sized space a mob can stand in.
+• Flow field: per-cell cost to a target, shared by every mob chasing it.
+• Block entity: state attached to a block position, stored in the chunk, not in the ECS.
+• Tick: one server simulation step, 1/30 s.

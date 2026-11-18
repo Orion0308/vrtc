@@ -1,0 +1,11 @@
+ninja_dyndep_version = 1.0
+build CMakeFiles/vrtc_shared.dir/src/shared/BlockRegistry.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_shared.dir/src/shared/Chunk.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_shared.dir/src/shared/ChunkSerial.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_shared.dir/src/shared/Connection.cpp.obj: dyndep
+
+build CMakeFiles/vrtc_shared.dir/src/shared/Protocol.cpp.obj: dyndep
+

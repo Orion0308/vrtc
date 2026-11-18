@@ -1,0 +1,11 @@
+{
+"rules": [
+{
+"primary-output": "CMakeFiles/vrtc_server.dir/src/server/Systems.cpp.o",
+"requires": [
+]
+}
+],
+"version": 0,
+"revision": 0
+}

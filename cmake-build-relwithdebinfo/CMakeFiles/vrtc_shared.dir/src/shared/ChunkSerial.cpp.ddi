@@ -1,0 +1,11 @@
+{
+"rules": [
+{
+"primary-output": "CMakeFiles/vrtc_shared.dir/src/shared/ChunkSerial.cpp.o",
+"requires": [
+]
+}
+],
+"version": 0,
+"revision": 0
+}

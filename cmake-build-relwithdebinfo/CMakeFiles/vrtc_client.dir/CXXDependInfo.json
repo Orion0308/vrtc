@@ -1,0 +1,93 @@
+{
+	"bmi-installation" : null,
+	"compiler-frontend-variant" : "GNU",
+	"compiler-id" : "GNU",
+	"compiler-simulate-id" : "",
+	"config" : "RelWithDebInfo",
+	"cxx-modules" : {},
+	"database-info" : null,
+	"dir-cur-bld" : "C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo",
+	"dir-cur-src" : "C:/Users/13ver/CLionProjects/VRTC",
+	"dir-top-bld" : "C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo",
+	"dir-top-src" : "C:/Users/13ver/CLionProjects/VRTC",
+	"exports" : [],
+	"forward-modules-from-target-dirs" : [],
+	"include-dirs" : 
+	[
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\src\\client",
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\src\\shared",
+		"C:\\Users\\13ver\\CLionProjects\\VRTC\\src\\core",
+		"C:\\Users\\13ver\\.vcpkg-clion\\vcpkg\\installed\\x64-mingw-dynamic\\include"
+	],
+	"language" : "CXX",
+	"linked-target-dirs" : [],
+	"module-dir" : "C:/Users/13ver/CLionProjects/VRTC/cmake-build-relwithdebinfo/CMakeFiles/vrtc_client.dir",
+	"sources" : 
+	{
+		"CMakeFiles/vrtc_client.dir/src/client/Camera.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Camera.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/ChunkRenderer.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/ChunkRenderer.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/ClientWorld.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/ClientWorld.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/DebugUI.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/DebugUI.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Engine.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Engine.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/GpuProfiler.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/GpuProfiler.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Input.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Input.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Mesher.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Mesher.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Renderer.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Renderer.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Shader.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Shader.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/TerrainTextures.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/TerrainTextures.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Texture.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Texture.cpp"
+		},
+		"CMakeFiles/vrtc_client.dir/src/client/Window.cpp.obj" : 
+		{
+			"language" : "CXX",
+			"source" : "C:/Users/13ver/CLionProjects/VRTC/src/client/Window.cpp"
+		}
+	}
+}
